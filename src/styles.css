@@ -46,7 +46,7 @@ body {
 .map-viewport {
   width: 100%;
   height: min(70vh, 620px);
-  overflow: hidden;
+  overflow: auto;
   border-radius: 12px;
   border: 1px solid #e2e8f0;
   background: #f1f5f9;
@@ -56,6 +56,12 @@ body {
 .map {
   display: block;
   background: #f1f5f9;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.map-content {
+  position: relative;
 }
 
 .map-viewport.pan-ready {

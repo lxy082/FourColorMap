@@ -40,7 +40,6 @@ function FourColorGame() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [toast, setToast] = useState('');
   const [zoomLevel, setZoomLevel] = useState(1);
-  const [viewBoxOrigin, setViewBoxOrigin] = useState({ x: 0, y: 0 });
   const [spacePressed, setSpacePressed] = useState(false);
   const [panEnabled, setPanEnabled] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -50,12 +49,8 @@ function FourColorGame() {
     active: false,
     startX: 0,
     startY: 0,
-    viewBoxX: 0,
-    viewBoxY: 0,
-    width: 0,
-    height: 0,
-    rectWidth: 1,
-    rectHeight: 1
+    scrollLeft: 0,
+    scrollTop: 0
   });
   const suppressClickRef = useRef(false);
 
@@ -110,7 +105,6 @@ function FourColorGame() {
     setHistory([]);
     setRedoStack([]);
     setIsGenerating(false);
-    setViewBoxOrigin((prev) => clampViewBox(prev.x, prev.y, zoomLevel));
   }, [regionCount]);
 
   useEffect(() => {
@@ -146,13 +140,18 @@ function FourColorGame() {
 
   const handleZoomChange = (nextZoom) => {
     const clamped = clamp(nextZoom, 1, 5);
-    const { width, height } = getViewBoxSize(zoomLevel);
-    const centerX = viewBoxOrigin.x + width / 2;
-    const centerY = viewBoxOrigin.y + height / 2;
-    const nextSize = getViewBoxSize(clamped);
-    const nextOrigin = clampViewBox(centerX - nextSize.width / 2, centerY - nextSize.height / 2, clamped);
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      setZoomLevel(clamped);
+      return;
+    }
+    const centerX = (viewport.scrollLeft + viewport.clientWidth / 2) / zoomLevel;
+    const centerY = (viewport.scrollTop + viewport.clientHeight / 2) / zoomLevel;
     setZoomLevel(clamped);
-    setViewBoxOrigin(nextOrigin);
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = centerX * clamped - viewport.clientWidth / 2;
+      viewport.scrollTop = centerY * clamped - viewport.clientHeight / 2;
+    });
   };
 
   const handleRegionClick = (regionId) => {
@@ -269,18 +268,12 @@ function FourColorGame() {
   const startDrag = (event) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    const rect = viewport.getBoundingClientRect();
-    const { width, height } = getViewBoxSize(zoomLevel);
     dragState.current = {
       active: true,
       startX: event.clientX,
       startY: event.clientY,
-      viewBoxX: viewBoxOrigin.x,
-      viewBoxY: viewBoxOrigin.y,
-      width,
-      height,
-      rectWidth: rect.width || 1,
-      rectHeight: rect.height || 1
+      scrollLeft: viewport.scrollLeft,
+      scrollTop: viewport.scrollTop
     };
     setIsDragging(true);
     suppressClickRef.current = false;
@@ -288,29 +281,27 @@ function FourColorGame() {
 
   const handlePointerDown = (event) => {
     if (event.button !== 0) return;
-    if (event.pointerType === 'touch' && panEnabled) {
-      startDrag(event);
-      event.currentTarget.setPointerCapture(event.pointerId);
-      return;
-    }
-    if (spacePressed) {
-      startDrag(event);
-      event.currentTarget.setPointerCapture(event.pointerId);
-    }
+    const shouldPan = spacePressed || (event.pointerType === 'touch' && panEnabled);
+    if (!shouldPan) return;
+    startDrag(event);
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const handlePointerMove = (event) => {
     if (!dragState.current.active) return;
+    event.preventDefault();
+    event.stopPropagation();
     const dx = event.clientX - dragState.current.startX;
     const dy = event.clientY - dragState.current.startY;
     if (Math.hypot(dx, dy) > PAN_THRESHOLD) {
       suppressClickRef.current = true;
     }
-    const scaleX = dragState.current.width / dragState.current.rectWidth;
-    const scaleY = dragState.current.height / dragState.current.rectHeight;
-    const nextX = dragState.current.viewBoxX - dx * scaleX;
-    const nextY = dragState.current.viewBoxY - dy * scaleY;
-    setViewBoxOrigin(clampViewBox(nextX, nextY, zoomLevel));
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    viewport.scrollLeft = dragState.current.scrollLeft - dx;
+    viewport.scrollTop = dragState.current.scrollTop - dy;
   };
 
   const handlePointerUp = () => {
@@ -392,17 +383,30 @@ function FourColorGame() {
             onPointerLeave={handlePointerUp}
             onPointerCancel={handlePointerUp}
           >
-            <svg
-              className="map"
-              viewBox={`${viewBoxOrigin.x} ${viewBoxOrigin.y} ${MAP_WIDTH / zoomLevel} ${
-                MAP_HEIGHT / zoomLevel
-              }`}
-              width="100%"
-              height="100%"
+            <div
+              className="map-content"
+              style={{
+                width: MAP_WIDTH * zoomLevel,
+                height: MAP_HEIGHT * zoomLevel
+              }}
             >
-              <rect width={MAP_WIDTH} height={MAP_HEIGHT} className="map-bg" />
-              {regions.map(renderPolygon)}
-            </svg>
+              <svg
+                className="map"
+                viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+                width={MAP_WIDTH * zoomLevel}
+                height={MAP_HEIGHT * zoomLevel}
+                onClickCapture={(event) => {
+                  if (suppressClickRef.current) {
+                    suppressClickRef.current = false;
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }
+                }}
+              >
+                <rect width={MAP_WIDTH} height={MAP_HEIGHT} className="map-bg" />
+                {regions.map(renderPolygon)}
+              </svg>
+            </div>
           </div>
         </div>
 
@@ -676,23 +680,6 @@ function getGreedyIterations(regionCount) {
   if (regionCount <= 80) return 60;
   if (regionCount <= 140) return 40;
   return 25;
-}
-
-function getViewBoxSize(zoomLevel) {
-  return {
-    width: MAP_WIDTH / zoomLevel,
-    height: MAP_HEIGHT / zoomLevel
-  };
-}
-
-function clampViewBox(x, y, zoomLevel) {
-  const { width, height } = getViewBoxSize(zoomLevel);
-  const maxX = Math.max(0, MAP_WIDTH - width);
-  const maxY = Math.max(0, MAP_HEIGHT - height);
-  return {
-    x: clamp(x, 0, maxX),
-    y: clamp(y, 0, maxY)
-  };
 }
 
 function normalizePolygon(polygon) {
