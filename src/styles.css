@@ -46,19 +46,24 @@ body {
 .map-viewport {
   width: 100%;
   height: min(70vh, 620px);
-  overflow: auto;
+  overflow: hidden;
   border-radius: 12px;
   border: 1px solid #e2e8f0;
   background: #f1f5f9;
-}
-
-.map-content {
-  position: relative;
+  touch-action: none;
 }
 
 .map {
   display: block;
   background: #f1f5f9;
+}
+
+.map-viewport.pan-ready {
+  cursor: grab;
+}
+
+.map-viewport.is-dragging {
+  cursor: grabbing;
 }
 
 .map-bg {
