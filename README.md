@@ -1,8 +1,8 @@
 # 四色定理地图挑战
 
-一个基于 React + Vite 的网页版四色地图填色小游戏，支持随机出题与玩家自定义出题。
+一个基于 React + Vite 的网页版四色地图填色小游戏（随机题模式）。
 
-## 启动
+## 本地开发
 
 ```bash
 npm install
@@ -11,32 +11,34 @@ npm run dev
 
 访问地址：`http://localhost:5173`
 
-主要页面：`/four-color`
-
-## 部署（GitHub Pages / 子路径）
-
-本项目是 Vite + React。生产环境需要先构建，并部署 `dist` 目录（不要直接部署 `index.html` + `src`）。如果部署在子路径（例如 `https://用户名.github.io/FourColorMap/`），请设置 `VITE_BASE_PATH`：
+## 生产构建
 
 ```bash
-VITE_BASE_PATH=/FourColorMap/ npm run build
+npm run build
 ```
 
-然后将 `dist` 目录发布到对应静态托管服务（GitHub Pages / Netlify / Vercel 静态目录）。
+构建产物输出在 `dist/`。
 
-## Codespaces 开发与预览（必须）
+## GitHub Pages 部署
 
-Codespaces 的预览必须打开 Vite dev server 端口（5173），不要直接打开 `index.html` 文件或其他端口，否则会导致 `main.jsx` 被当成二进制下载，出现 `application/octet-stream` 的模块加载错误。
+本项目已提供 GitHub Actions 自动部署到 Pages。
+
+1. 在仓库 Settings → Pages 中选择 **Build and deployment: GitHub Actions**。
+2. 推送到 `main` 分支会自动构建并发布。
+3. Pages 使用的 base 路径由环境变量注入（`BASE_PATH=/<repo>/`），无需手动改代码。
+
+## Codespaces 开发与预览
 
 ```bash
 npm install
 npm run dev:codespace
 ```
 
-然后在 **Ports** 面板找到 **5173** 并点击 **Open in Browser**。
+然后在 **Ports** 面板打开 **5173**（Open in Browser）。
 
 ## 功能说明
 
-- 随机地图模式：使用 Voronoi 生成分区地图，可选择难度。
-- 自定义出题：在画布上绘制闭合区域后进入填色挑战。
+- 随机地图模式：使用 Voronoi 生成分区地图，可调整区域数量。
 - 四色约束校验、冲突高亮、目标色参考值与鼓励文案。
 - 支持撤销/重做、重置确认与调试面板。
+- 盘面支持缩放与平移（桌面按住空格拖动）。
