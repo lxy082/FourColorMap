@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react'
 import { Delaunay } from 'd3-delaunay';
 
 const COLORS = [
-  { name: '赤', hex: '#ef4444' },
+  { name: '红', hex: '#ef4444' },
   { name: '绿', hex: '#22c55e' },
   { name: '蓝', hex: '#3b82f6' },
   { name: '黄', hex: '#f59e0b' }
