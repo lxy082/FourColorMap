@@ -28,6 +28,7 @@ npm run build
 2. 在 **Build and deployment** 中选择 **GitHub Actions**。
 3. 推送到 `main` 分支会自动构建并发布。
 4. Pages 使用的 base 路径由 workflow 注入（`BASE_PATH=/<repo>/`），无需手动改代码。
+5. 若 Actions 报错 “Dependencies lock file is not found”，说明仓库没有 lock 文件，workflow 已改为 `npm install` 以避免该错误。
 
 ### 本地模拟 Pages 访问验证
 
