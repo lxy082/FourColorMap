@@ -23,7 +23,16 @@ VITE_BASE_PATH=/FourColorMap/ npm run build
 
 然后将 `dist` 目录发布到对应静态托管服务（GitHub Pages / Netlify / Vercel 静态目录）。
 
-> 说明：本项目未在 PR 中包含 `favicon.ico`（二进制文件），部署时可自行在 public 目录添加。
+## Codespaces 开发与预览（必须）
+
+Codespaces 的预览必须打开 Vite dev server 端口（5173），不要直接打开 `index.html` 文件或其他端口，否则会导致 `main.jsx` 被当成二进制下载，出现 `application/octet-stream` 的模块加载错误。
+
+```bash
+npm install
+npm run dev:codespace
+```
+
+然后在 **Ports** 面板找到 **5173** 并点击 **Open in Browser**。
 
 ## 功能说明
 
