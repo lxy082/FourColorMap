@@ -307,6 +307,11 @@ button:disabled {
   padding: 6px 8px;
 }
 
+.zoom-value {
+  text-align: right;
+  font-weight: 600;
+}
+
 .muted {
   color: #64748b;
   font-size: 13px;

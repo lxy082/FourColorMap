@@ -62,6 +62,10 @@ function FourColorGame() {
   const [showResetModal, setShowResetModal] = useState(false);
   const [showNewModal, setShowNewModal] = useState(false);
   const [toast, setToast] = useState('');
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState(null);
 
   const [customRegions, setCustomRegions] = useState([]);
   const [customEditing, setCustomEditing] = useState(true);
@@ -69,6 +73,7 @@ function FourColorGame() {
   const [drawingMessage, setDrawingMessage] = useState('');
   const [previewPolygon, setPreviewPolygon] = useState(null);
   const [previewMessage, setPreviewMessage] = useState('');
+  const [lastCustomRegionId, setLastCustomRegionId] = useState('');
   const [isDrawing, setIsDrawing] = useState(false);
   const svgRef = useRef(null);
 
@@ -137,6 +142,21 @@ function FourColorGame() {
     return () => clearTimeout(timer);
   }, [toast]);
 
+  const handleZoomChange = (nextZoom) => {
+    const clamped = clamp(nextZoom, 1, 5);
+    const center = { x: MAP_WIDTH / 2, y: MAP_HEIGHT / 2 };
+    const worldCenter = {
+      x: (center.x - panOffset.x) / zoomLevel,
+      y: (center.y - panOffset.y) / zoomLevel
+    };
+    const newOffset = {
+      x: center.x - worldCenter.x * clamped,
+      y: center.y - worldCenter.y * clamped
+    };
+    setZoomLevel(clamped);
+    setPanOffset(newOffset);
+  };
+
   const startCustomChallenge = useCallback(() => {
     const sanitized = customRegions.map((region) => ({
       ...region,
@@ -171,6 +191,7 @@ function FourColorGame() {
       setAdjacency(new Map());
       setPreviewPolygon(null);
       setPreviewMessage('');
+      setLastCustomRegionId('');
     }
   };
 
@@ -292,60 +313,91 @@ function FourColorGame() {
   };
 
   const handlePointerDown = (event) => {
-    if (mode !== 'custom' || !customEditing) return;
-    if (event.target.tagName !== 'svg' && event.target.tagName !== 'rect') return;
-    const point = getSvgPoint(event, svgRef.current);
-    if (!point) return;
-    setIsDrawing(true);
-    setDrawingPoints([point]);
-    setDrawingMessage('');
-    event.currentTarget.setPointerCapture(event.pointerId);
+    if (event.button !== 0) return;
+    const targetTag = event.target.tagName;
+    const isBackground = targetTag === 'svg' || targetTag === 'rect';
+    if (!isBackground) return;
+    if (mode === 'custom' && customEditing && !event.shiftKey) {
+      const point = getSvgPoint(event, svgRef.current, zoomLevel, panOffset);
+      if (!point) return;
+      setIsDrawing(true);
+      setDrawingPoints([point]);
+      setDrawingMessage('');
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+    if (zoomLevel > 1) {
+      const screenPoint = getSvgScreenPoint(event, svgRef.current);
+      if (!screenPoint) return;
+      setIsPanning(true);
+      setPanStart({ point: screenPoint, offset: panOffset });
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
   };
 
   const handlePointerMove = (event) => {
-    if (!isDrawing || mode !== 'custom' || !customEditing) return;
-    const point = getSvgPoint(event, svgRef.current);
-    if (!point) return;
-    setDrawingPoints((prev) => [...prev, point]);
+    if (isDrawing && mode === 'custom' && customEditing) {
+      const point = getSvgPoint(event, svgRef.current, zoomLevel, panOffset);
+      if (!point) return;
+      setDrawingPoints((prev) => [...prev, point]);
+      return;
+    }
+    if (isPanning && panStart) {
+      const screenPoint = getSvgScreenPoint(event, svgRef.current);
+      if (!screenPoint) return;
+      const dx = screenPoint.x - panStart.point.x;
+      const dy = screenPoint.y - panStart.point.y;
+      setPanOffset({
+        x: panStart.offset.x + dx,
+        y: panStart.offset.y + dy
+      });
+    }
   };
 
   const handlePointerUp = (event) => {
-    if (!isDrawing || mode !== 'custom' || !customEditing) return;
-    const points = [...drawingPoints];
-    setIsDrawing(false);
-    setDrawingPoints([]);
+    if (isDrawing && mode === 'custom' && customEditing) {
+      const points = [...drawingPoints];
+      setIsDrawing(false);
+      setDrawingPoints([]);
 
-    if (points.length < 3) return;
+      if (points.length < 3) return;
 
-    const simplified = simplifyPath(points, 3);
-    const fitted = fitToMaxPoints(simplified, TARGET_SIMPLIFY_POINTS);
-    const snapThreshold = MAP_WIDTH * 0.012;
-    const { polygon, message } = buildSnappedPolygon(fitted, customRegions, snapThreshold);
-    if (!polygon) {
-      setDrawingMessage(message || '形状不合法，请靠近已有边界绘制或画封闭区域。');
-      return;
+      const simplified = simplifyPath(points, 3);
+      const fitted = fitToMaxPoints(simplified, TARGET_SIMPLIFY_POINTS);
+      const snapThreshold = MAP_WIDTH * 0.012;
+      const { polygon, message } = buildSnappedPolygon(fitted, customRegions, snapThreshold);
+      if (!polygon) {
+        setDrawingMessage(message || '形状不合法，请靠近已有边界绘制或画封闭区域。');
+        return;
+      }
+
+      const area = Math.abs(polygonArea(polygon));
+      if (area < MIN_POLYGON_AREA) {
+        setDrawingMessage('区域太小，请重新绘制。');
+        return;
+      }
+
+      setPreviewPolygon(polygon);
+      setPreviewMessage('预览已生成，可确认或取消。');
     }
-
-    const area = Math.abs(polygonArea(polygon));
-    if (area < MIN_POLYGON_AREA) {
-      setDrawingMessage('区域太小，请重新绘制。');
-      return;
+    if (isPanning) {
+      setIsPanning(false);
+      setPanStart(null);
     }
-
-    setPreviewPolygon(polygon);
-    setPreviewMessage('预览已生成，可确认或取消。');
   };
 
   const handleConfirmPreview = () => {
     if (!previewPolygon) return;
+    const regionId = `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const region = {
-      id: `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      id: regionId,
       polygon: previewPolygon,
       color: null
     };
     setCustomRegions((prev) => [...prev, region]);
     setPreviewPolygon(null);
     setPreviewMessage('');
+    setLastCustomRegionId(regionId);
   };
 
   const handleCancelPreview = () => {
@@ -364,6 +416,7 @@ function FourColorGame() {
     setSelectedId(null);
     setPreviewPolygon(null);
     setPreviewMessage('');
+    setLastCustomRegionId('');
   };
 
   const activeRegions = mode === 'custom' && customEditing ? customRegions : regions;
@@ -417,23 +470,25 @@ function FourColorGame() {
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
           >
-            <rect width={MAP_WIDTH} height={MAP_HEIGHT} className="map-bg" />
-            {activeRegions.map(renderPolygon)}
-            {previewPolygon && (
-              <polygon
-                points={previewPolygon.map((p) => `${p.x},${p.y}`).join(' ')}
-                className="region preview"
-              />
-            )}
-            {drawingPath && customEditing && (
-              <path d={drawingPath} className="drawing-path" />
-            )}
+            <g transform={`translate(${panOffset.x} ${panOffset.y}) scale(${zoomLevel})`}>
+              <rect width={MAP_WIDTH} height={MAP_HEIGHT} className="map-bg" />
+              {activeRegions.map(renderPolygon)}
+              {previewPolygon && (
+                <polygon
+                  points={previewPolygon.map((p) => `${p.x},${p.y}`).join(' ')}
+                  className="region preview"
+                />
+              )}
+              {drawingPath && customEditing && (
+                <path d={drawingPath} className="drawing-path" />
+              )}
+            </g>
           </svg>
 
           {mode === 'custom' && customEditing && (
             <div className="drawing-help">
               <strong>自定义出题：</strong>
-              <span>按住并拖动绘制闭合区域，抬起结束一笔。</span>
+              <span>按住并拖动绘制区域，抬起结束一笔；靠近已有边可吸附共边。放大后按住 Shift 拖拽平移。</span>
               {drawingMessage && <span className="warn">{drawingMessage}</span>}
               {previewMessage && <span className="info">{previewMessage}</span>}
               {previewPolygon && (
@@ -483,6 +538,22 @@ function FourColorGame() {
             </section>
           )}
 
+          <section className="panel-section">
+            <h2>盘面缩放</h2>
+            <div className="range-row">
+              <input
+                type="range"
+                min={1}
+                max={5}
+                step={0.1}
+                value={zoomLevel}
+                onChange={(event) => handleZoomChange(Number(event.target.value))}
+              />
+              <div className="zoom-value">{Math.round(zoomLevel * 100)}%</div>
+            </div>
+            <div className="muted">放大后可在盘面空白处拖拽平移。</div>
+          </section>
+
           {mode === 'custom' && customEditing && (
             <section className="panel-section">
               <h2>出题工具</h2>
@@ -497,12 +568,12 @@ function FourColorGame() {
               <button
                 className="primary"
                 onClick={startCustomChallenge}
-                disabled={customRegions.length < 4}
+                disabled={customRegions.length < 2}
               >
                 开始填色挑战
               </button>
-              {customRegions.length < 4 && (
-                <div className="muted">至少绘制 4 个区域才更有挑战性。</div>
+              {customRegions.length < 2 && (
+                <div className="muted">至少需要 2 个区域才能开始挑战。</div>
               )}
             </section>
           )}
@@ -567,18 +638,15 @@ function FourColorGame() {
             <summary>规则与背景</summary>
             <div className="rules">
               <p>
-                <strong>四色定理</strong>告诉我们：任何平面地图的相邻区域都可以用不超过四种颜色完成着色。
+                <strong>四色定理</strong>指出：任何平面地图的相邻区域最多用四种颜色就能区分。
+                本游戏的相邻定义为“共享一段边界”，不能只在一点相接。
+                只要相邻不同色即可通关，目标色使用更少会获得额外鼓励。
               </p>
-              <ul>
-                <li>四种颜色给地图区域上色，相邻区域不可同色。</li>
-                <li>相邻定义：两块区域共享一段边界（不是仅在一个点相接）。</li>
-                <li>目标颜色尽量少用，但不影响通关。</li>
-              </ul>
-              <p>
-                操作说明：点击区域选中后，直接点击色板颜色即可填色；点击清除可擦除颜色。
-                支持撤销/重做、重置与生成新题。
-              </p>
-              <p>移动端建议双指缩放，或横屏体验更佳。</p>
+              <details>
+                <summary>更多背景</summary>
+                <p>四色定理强调平面区域的相邻关系只需要四种颜色即可区分，本游戏用它来挑战你的配色策略。</p>
+              </details>
+              <p>移动端建议横屏或使用盘面缩放滑条。</p>
             </div>
           </details>
 
@@ -589,6 +657,13 @@ function FourColorGame() {
               <div>相邻边数量：{adjacencyEdgeCount}</div>
               <div>当前目标色次数：{targetColorCount}</div>
               <div>最近冲突：{conflicts.map((pair) => pair.join(' ↔ ')).join(', ') || '无'}</div>
+              {mode === 'custom' && customEditing && (
+                <>
+                  <div>自定义区域数：{customRegions.length}</div>
+                  <div>预览中：{previewPolygon ? '是' : '否'}</div>
+                  <div>最近区域 ID：{lastCustomRegionId || '无'}</div>
+                </>
+              )}
             </div>
           </details>
         </aside>
@@ -798,7 +873,22 @@ function segmentOverlapLength(a1, a2, b1, b2) {
   return overlap > 0 ? overlap : 0;
 }
 
-function getSvgPoint(event, svg) {
+function getSvgPoint(event, svg, scale, offset) {
+  if (!svg) return null;
+  const rect = svg.getBoundingClientRect();
+  const scaleX = MAP_WIDTH / rect.width;
+  const scaleY = MAP_HEIGHT / rect.height;
+  const screenPoint = {
+    x: (event.clientX - rect.left) * scaleX,
+    y: (event.clientY - rect.top) * scaleY
+  };
+  return {
+    x: (screenPoint.x - offset.x) / scale,
+    y: (screenPoint.y - offset.y) / scale
+  };
+}
+
+function getSvgScreenPoint(event, svg) {
   if (!svg) return null;
   const rect = svg.getBoundingClientRect();
   const scaleX = MAP_WIDTH / rect.width;
