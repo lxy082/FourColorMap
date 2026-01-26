@@ -3,7 +3,7 @@ import { Routes, Route, Link, useNavigate } from 'react-router-dom';
 import { Delaunay } from 'd3-delaunay';
 
 const COLORS = [
-  { name: '赤', hex: '#ef4444' },
+  { name: '红', hex: '#ef4444' },
   { name: '绿', hex: '#22c55e' },
   { name: '蓝', hex: '#3b82f6' },
   { name: '黄', hex: '#f59e0b' }
@@ -12,14 +12,11 @@ const COLORS = [
 const MAP_WIDTH = 900;
 const MAP_HEIGHT = 620;
 
-const DIFFICULTY_MAP = {
-  easy: 30,
-  medium: 50,
-  hard: 100
-};
-
 const CLOSE_THRESHOLD = 20;
 const MIN_POLYGON_AREA = 350;
+const MIN_REGION_COUNT = 10;
+const MAX_REGION_COUNT = 100;
+const TARGET_SIMPLIFY_POINTS = 18;
 
 function App() {
   return (
@@ -50,7 +47,8 @@ function Home() {
 function FourColorGame() {
   const navigate = useNavigate();
   const [mode, setMode] = useState('random');
-  const [difficulty, setDifficulty] = useState('medium');
+  const [regionCount, setRegionCount] = useState(30);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [regions, setRegions] = useState([]);
   const [adjacency, setAdjacency] = useState(new Map());
   const [targetColorIndex, setTargetColorIndex] = useState(0);
@@ -63,11 +61,14 @@ function FourColorGame() {
   const [redoStack, setRedoStack] = useState([]);
   const [showResetModal, setShowResetModal] = useState(false);
   const [showNewModal, setShowNewModal] = useState(false);
+  const [toast, setToast] = useState('');
 
   const [customRegions, setCustomRegions] = useState([]);
   const [customEditing, setCustomEditing] = useState(true);
   const [drawingPoints, setDrawingPoints] = useState([]);
   const [drawingMessage, setDrawingMessage] = useState('');
+  const [previewPolygon, setPreviewPolygon] = useState(null);
+  const [previewMessage, setPreviewMessage] = useState('');
   const [isDrawing, setIsDrawing] = useState(false);
   const svgRef = useRef(null);
 
@@ -102,8 +103,9 @@ function FourColorGame() {
   }, [adjacency]);
 
   const generateNewPuzzle = useCallback(() => {
+    setIsGenerating(true);
     const targetIndex = Math.floor(Math.random() * COLORS.length);
-    const count = DIFFICULTY_MAP[difficulty];
+    const count = clamp(Math.round(regionCount), MIN_REGION_COUNT, MAX_REGION_COUNT);
     const { regions: newRegions, adjacency: newAdjacency } = generateRandomMap(
       count,
       MAP_WIDTH,
@@ -120,13 +122,20 @@ function FourColorGame() {
     setMessage('');
     setHistory([]);
     setRedoStack([]);
-  }, [difficulty]);
+    setIsGenerating(false);
+  }, [regionCount]);
 
   useEffect(() => {
     if (mode === 'random') {
       generateNewPuzzle();
     }
-  }, [mode, difficulty, generateNewPuzzle]);
+  }, [mode, generateNewPuzzle]);
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = setTimeout(() => setToast(''), 1600);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   const startCustomChallenge = useCallback(() => {
     const sanitized = customRegions.map((region) => ({
@@ -160,6 +169,8 @@ function FourColorGame() {
       setCustomEditing(true);
       setRegions([]);
       setAdjacency(new Map());
+      setPreviewPolygon(null);
+      setPreviewMessage('');
     }
   };
 
@@ -180,11 +191,14 @@ function FourColorGame() {
     );
   };
 
-  const handleFillSelected = () => {
-    if (!selectedId) return;
+  const applyPaletteColor = (nextColor) => {
+    if (!selectedId) {
+      setToast('请先选择一个区域');
+      return;
+    }
     const region = regionById.get(selectedId);
     if (!region) return;
-    const nextColor = region.color === currentColor ? null : currentColor;
+    if (region.color === nextColor) return;
     setHistory((prev) => [...prev, { regionId: selectedId, prevColor: region.color, nextColor }]);
     setRedoStack([]);
     applyColorChange(selectedId, nextColor);
@@ -193,7 +207,10 @@ function FourColorGame() {
   };
 
   const handleClearSelected = () => {
-    if (!selectedId) return;
+    if (!selectedId) {
+      setToast('请先选择一个区域');
+      return;
+    }
     const region = regionById.get(selectedId);
     if (!region || region.color == null) return;
     setHistory((prev) => [...prev, { regionId: selectedId, prevColor: region.color, nextColor: null }]);
@@ -301,25 +318,39 @@ function FourColorGame() {
     if (points.length < 3) return;
 
     const simplified = simplifyPath(points, 3);
-    const closed = closePath(simplified, CLOSE_THRESHOLD);
-    if (!closed) {
-      setDrawingMessage('形状不合法，请重新绘制。');
+    const fitted = fitToMaxPoints(simplified, TARGET_SIMPLIFY_POINTS);
+    const snapThreshold = MAP_WIDTH * 0.012;
+    const { polygon, message } = buildSnappedPolygon(fitted, customRegions, snapThreshold);
+    if (!polygon) {
+      setDrawingMessage(message || '形状不合法，请靠近已有边界绘制或画封闭区域。');
       return;
     }
 
-    const area = Math.abs(polygonArea(closed));
+    const area = Math.abs(polygonArea(polygon));
     if (area < MIN_POLYGON_AREA) {
       setDrawingMessage('区域太小，请重新绘制。');
       return;
     }
 
+    setPreviewPolygon(polygon);
+    setPreviewMessage('预览已生成，可确认或取消。');
+  };
+
+  const handleConfirmPreview = () => {
+    if (!previewPolygon) return;
     const region = {
       id: `custom-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      polygon: closed,
+      polygon: previewPolygon,
       color: null
     };
-
     setCustomRegions((prev) => [...prev, region]);
+    setPreviewPolygon(null);
+    setPreviewMessage('');
+  };
+
+  const handleCancelPreview = () => {
+    setPreviewPolygon(null);
+    setPreviewMessage('已取消预览，请重新绘制。');
   };
 
   const handleDeleteCustomRegion = () => {
@@ -331,6 +362,8 @@ function FourColorGame() {
   const handleClearCustom = () => {
     setCustomRegions([]);
     setSelectedId(null);
+    setPreviewPolygon(null);
+    setPreviewMessage('');
   };
 
   const activeRegions = mode === 'custom' && customEditing ? customRegions : regions;
@@ -386,6 +419,12 @@ function FourColorGame() {
           >
             <rect width={MAP_WIDTH} height={MAP_HEIGHT} className="map-bg" />
             {activeRegions.map(renderPolygon)}
+            {previewPolygon && (
+              <polygon
+                points={previewPolygon.map((p) => `${p.x},${p.y}`).join(' ')}
+                className="region preview"
+              />
+            )}
             {drawingPath && customEditing && (
               <path d={drawingPath} className="drawing-path" />
             )}
@@ -396,6 +435,15 @@ function FourColorGame() {
               <strong>自定义出题：</strong>
               <span>按住并拖动绘制闭合区域，抬起结束一笔。</span>
               {drawingMessage && <span className="warn">{drawingMessage}</span>}
+              {previewMessage && <span className="info">{previewMessage}</span>}
+              {previewPolygon && (
+                <div className="button-row">
+                  <button className="primary" onClick={handleConfirmPreview}>
+                    确认生成
+                  </button>
+                  <button onClick={handleCancelPreview}>取消</button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -414,18 +462,24 @@ function FourColorGame() {
 
           {mode === 'random' && (
             <section className="panel-section">
-              <h2>难度</h2>
-              <div className="button-group">
-                <button className={difficulty === 'easy' ? 'active' : ''} onClick={() => setDifficulty('easy')}>
-                  简单
-                </button>
-                <button className={difficulty === 'medium' ? 'active' : ''} onClick={() => setDifficulty('medium')}>
-                  中等
-                </button>
-                <button className={difficulty === 'hard' ? 'active' : ''} onClick={() => setDifficulty('hard')}>
-                  困难
-                </button>
+              <h2>区域数量</h2>
+              <div className="range-row">
+                <input
+                  type="range"
+                  min={MIN_REGION_COUNT}
+                  max={MAX_REGION_COUNT}
+                  value={regionCount}
+                  onChange={(event) => setRegionCount(Number(event.target.value))}
+                />
+                <input
+                  type="number"
+                  min={MIN_REGION_COUNT}
+                  max={MAX_REGION_COUNT}
+                  value={regionCount}
+                  onChange={(event) => setRegionCount(clamp(Number(event.target.value), MIN_REGION_COUNT, MAX_REGION_COUNT))}
+                />
               </div>
+              <div className="muted">范围：{MIN_REGION_COUNT} - {MAX_REGION_COUNT}</div>
             </section>
           )}
 
@@ -461,47 +515,49 @@ function FourColorGame() {
             </section>
           )}
 
-          <section className="panel-section">
-            <h2>色板</h2>
-            <div className="palette">
-              {COLORS.map((color, index) => (
-                <button
-                  key={color.name}
-                  className={currentColor === index ? 'palette-color active' : 'palette-color'}
-                  style={{ background: color.hex }}
-                  onClick={() => setCurrentColor(index)}
-                  disabled={!isPlaying}
-                >
-                  {color.name}
+            <section className="panel-section">
+              <h2>色板</h2>
+              <div className="palette">
+                {COLORS.map((color, index) => (
+                  <button
+                    key={color.name}
+                    className={currentColor === index ? 'palette-color active' : 'palette-color'}
+                    style={{ background: color.hex }}
+                    onClick={() => {
+                      setCurrentColor(index);
+                      applyPaletteColor(index);
+                    }}
+                    disabled={!isPlaying}
+                  >
+                    {color.name}
+                  </button>
+                ))}
+                <button className="palette-color eraser" onClick={handleClearSelected} disabled={!isPlaying}>
+                  清除
                 </button>
-              ))}
-              <button className="palette-color eraser" onClick={handleClearSelected} disabled={!isPlaying}>
-                清除
-              </button>
-            </div>
-            <div className="button-row">
-              <button className="primary" onClick={handleFillSelected} disabled={!selectedId || !isPlaying}>
-                填色/切换
-              </button>
-              <button onClick={handleUndo} disabled={!history.length || !isPlaying}>
-                撤销
-              </button>
-              <button onClick={handleRedo} disabled={!redoStack.length || !isPlaying}>
-                重做
-              </button>
-            </div>
-          </section>
+              </div>
+              <div className="button-row">
+                <button onClick={handleUndo} disabled={!history.length || !isPlaying}>
+                  撤销
+                </button>
+                <button onClick={handleRedo} disabled={!redoStack.length || !isPlaying}>
+                  重做
+                </button>
+              </div>
+            </section>
 
           <section className="panel-section">
             <h2>操作</h2>
             <div className="button-column">
-              <button className="primary" onClick={handleCheck} disabled={!isPlaying || !regions.length}>
-                检查/提交
+              <button className="primary" onClick={handleCheck} disabled={!isPlaying || !regions.length || isGenerating}>
+                {isGenerating ? '生成中...' : '检查/提交'}
               </button>
-              <button onClick={() => setShowResetModal(true)} disabled={!isPlaying || !regions.length}>
+              <button onClick={() => setShowResetModal(true)} disabled={!isPlaying || !regions.length || isGenerating}>
                 重置本题
               </button>
-              <button onClick={() => setShowNewModal(true)}>生成新题</button>
+              <button onClick={() => setShowNewModal(true)} disabled={isGenerating}>
+                生成新题
+              </button>
             </div>
             {message && <div className="message">{message}</div>}
             <div className="muted">目标色使用次数：{targetColorCount}</div>
@@ -519,7 +575,7 @@ function FourColorGame() {
                 <li>目标颜色尽量少用，但不影响通关。</li>
               </ul>
               <p>
-                操作说明：点击区域选中后，从色板选择颜色，再点击“填色/切换”即可。再次点击同色可清除。
+                操作说明：点击区域选中后，直接点击色板颜色即可填色；点击清除可擦除颜色。
                 支持撤销/重做、重置与生成新题。
               </p>
               <p>移动端建议双指缩放，或横屏体验更佳。</p>
@@ -555,6 +611,8 @@ function FourColorGame() {
           onConfirm={handleNewPuzzle}
         />
       )}
+
+      {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
@@ -783,6 +841,193 @@ function closePath(points, threshold) {
   const closed = dist < threshold ? [...points.slice(0, -1)] : [...points, start];
   if (closed.length < 3) return null;
   return closed;
+}
+
+function buildSnappedPolygon(points, regions, threshold) {
+  const edges = buildEdgeGraph(regions, threshold);
+  const snappedPoints = snapPointsToEdges(points, edges, threshold);
+  const start = snappedPoints[0];
+  const end = snappedPoints[snappedPoints.length - 1];
+
+  const { graph, nodes } = buildGraphFromEdges(edges, start, end, threshold);
+  const startNode = findNearestNode(nodes, start, threshold);
+  const endNode = findNearestNode(nodes, end, threshold);
+
+  let path = null;
+  if (startNode && endNode) {
+    path = shortestPath(graph, startNode.id, endNode.id);
+  }
+
+  if (path && path.length > 1) {
+    const pathPoints = path.map((nodeId) => nodes.get(nodeId)).reverse();
+    const combined = mergePolyline(snappedPoints, pathPoints);
+    return { polygon: combined, message: '' };
+  }
+
+  const closed = closePath(snappedPoints, CLOSE_THRESHOLD);
+  if (!closed) {
+    return { polygon: null, message: '形状不合法，请靠近已有边界绘制或画封闭区域。' };
+  }
+  return { polygon: closed, message: '' };
+}
+
+function buildEdgeGraph(regions, threshold) {
+  const edges = [];
+  regions.forEach((region) => {
+    const poly = region.polygon;
+    for (let i = 0; i < poly.length; i += 1) {
+      const start = poly[i];
+      const end = poly[(i + 1) % poly.length];
+      if (distancePoints(start, end) > threshold / 2) {
+        edges.push({ start, end });
+      }
+    }
+  });
+  return edges;
+}
+
+function snapPointsToEdges(points, edges, threshold) {
+  if (!edges.length) return points;
+  return points.map((point) => {
+    let snapped = point;
+    let minDist = threshold;
+    edges.forEach((edge) => {
+      const projection = projectPointToSegment(point, edge.start, edge.end);
+      const dist = distancePoints(point, projection);
+      if (dist < minDist) {
+        minDist = dist;
+        snapped = projection;
+      }
+    });
+    return snapped;
+  });
+}
+
+function buildGraphFromEdges(edges, startPoint, endPoint, threshold) {
+  const nodes = new Map();
+  const graph = new Map();
+
+  const getNode = (point) => {
+    const existing = findNearestNode(nodes, point, threshold);
+    if (existing) return existing;
+    const id = `node-${nodes.size}-${Math.random().toString(16).slice(2)}`;
+    const node = { id, x: point.x, y: point.y };
+    nodes.set(id, node);
+    return node;
+  };
+
+  const connect = (a, b) => {
+    if (!graph.has(a.id)) graph.set(a.id, new Map());
+    if (!graph.has(b.id)) graph.set(b.id, new Map());
+    const length = distancePoints(a, b);
+    graph.get(a.id).set(b.id, length);
+    graph.get(b.id).set(a.id, length);
+  };
+
+  edges.forEach((edge) => {
+    const a = getNode(edge.start);
+    const b = getNode(edge.end);
+    connect(a, b);
+  });
+
+  const startNode = getNode(startPoint);
+  const endNode = getNode(endPoint);
+  const nearestStart = findNearestNode(nodes, startPoint, threshold);
+  const nearestEnd = findNearestNode(nodes, endPoint, threshold);
+  if (nearestStart && nearestStart.id !== startNode.id) connect(startNode, nearestStart);
+  if (nearestEnd && nearestEnd.id !== endNode.id) connect(endNode, nearestEnd);
+
+  return { graph, nodes };
+}
+
+function findNearestNode(nodes, point, threshold) {
+  let result = null;
+  nodes.forEach((node) => {
+    if (distancePoints(node, point) < threshold) {
+      result = node;
+    }
+  });
+  return result;
+}
+
+function shortestPath(graph, startId, endId) {
+  if (!graph.has(startId) || !graph.has(endId)) return null;
+  const distances = new Map();
+  const previous = new Map();
+  const unvisited = new Set(graph.keys());
+  graph.forEach((_, key) => distances.set(key, Infinity));
+  distances.set(startId, 0);
+
+  while (unvisited.size) {
+    let current = null;
+    let min = Infinity;
+    unvisited.forEach((nodeId) => {
+      const dist = distances.get(nodeId);
+      if (dist < min) {
+        min = dist;
+        current = nodeId;
+      }
+    });
+    if (!current) break;
+    unvisited.delete(current);
+    if (current === endId) break;
+    const neighbors = graph.get(current) || new Map();
+    neighbors.forEach((weight, neighborId) => {
+      if (!unvisited.has(neighborId)) return;
+      const alt = distances.get(current) + weight;
+      if (alt < distances.get(neighborId)) {
+        distances.set(neighborId, alt);
+        previous.set(neighborId, current);
+      }
+    });
+  }
+
+  if (!previous.has(endId) && startId !== endId) return null;
+  const path = [endId];
+  let current = endId;
+  while (current !== startId) {
+    current = previous.get(current);
+    if (!current) return null;
+    path.push(current);
+  }
+  return path;
+}
+
+function mergePolyline(line, path) {
+  const merged = [...line];
+  const pathPoints = path.slice(1);
+  pathPoints.forEach((point) => merged.push(point));
+  return merged;
+}
+
+function projectPointToSegment(point, start, end) {
+  const vx = end.x - start.x;
+  const vy = end.y - start.y;
+  const lenSq = vx * vx + vy * vy;
+  if (lenSq === 0) return start;
+  const t = ((point.x - start.x) * vx + (point.y - start.y) * vy) / lenSq;
+  const clamped = Math.max(0, Math.min(1, t));
+  return {
+    x: start.x + clamped * vx,
+    y: start.y + clamped * vy
+  };
+}
+
+function fitToMaxPoints(points, targetCount) {
+  if (points.length <= targetCount) return points;
+  const step = Math.ceil(points.length / targetCount);
+  const result = [];
+  for (let i = 0; i < points.length; i += step) {
+    result.push(points[i]);
+  }
+  if (result[result.length - 1] !== points[points.length - 1]) {
+    result.push(points[points.length - 1]);
+  }
+  return result;
+}
+
+function distancePoints(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
 function polygonArea(points) {
