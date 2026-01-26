@@ -18,55 +18,6 @@ body {
   padding: 24px;
 }
 
-.home {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.home-card {
-  background: #ffffff;
-  padding: 32px;
-  max-width: 520px;
-  border-radius: 20px;
-  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
-  text-align: center;
-}
-
-.home-card h1 {
-  margin-bottom: 16px;
-}
-
-.home-card p {
-  color: #475569;
-  line-height: 1.6;
-  margin-bottom: 24px;
-}
-
-.primary {
-  background: #2563eb;
-  color: #ffffff;
-  border: none;
-  padding: 10px 18px;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.primary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.ghost {
-  background: transparent;
-  border: 1px solid #cbd5f5;
-  padding: 6px 12px;
-  border-radius: 8px;
-  color: #1e293b;
-  cursor: pointer;
-}
-
 .top-bar {
   display: flex;
   align-items: center;
@@ -92,12 +43,22 @@ body {
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
 }
 
-.map {
+.map-viewport {
   width: 100%;
-  height: auto;
+  height: min(70vh, 620px);
+  overflow: auto;
   border-radius: 12px;
+  border: 1px solid #e2e8f0;
   background: #f1f5f9;
-  touch-action: none;
+}
+
+.map-content {
+  position: relative;
+}
+
+.map {
+  display: block;
+  background: #f1f5f9;
 }
 
 .map-bg {
@@ -162,14 +123,10 @@ body {
   font-weight: 600;
 }
 
-.button-group,
 .button-row {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.button-row {
   margin-top: 10px;
 }
 
@@ -197,6 +154,16 @@ button.active {
 button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.toggle {
+  width: 100%;
+}
+
+.toggle.active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
 }
 
 .palette {
@@ -328,6 +295,10 @@ button:disabled {
 
   .page {
     padding: 16px;
+  }
+
+  .map-viewport {
+    height: 60vh;
   }
 
   button {

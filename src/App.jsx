@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Delaunay } from 'd3-delaunay';
 
 const COLORS = [
@@ -13,7 +13,7 @@ const MAP_HEIGHT = 620;
 
 const MIN_REGION_COUNT = 10;
 const MAX_REGION_COUNT = 200;
-const PAN_THRESHOLD = 4;
+const PAN_THRESHOLD = 5;
 
 function App() {
   return (
@@ -40,14 +40,12 @@ function FourColorGame() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [toast, setToast] = useState('');
   const [zoomLevel, setZoomLevel] = useState(1);
-  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
-  const [isPanning, setIsPanning] = useState(false);
-  const [panStart, setPanStart] = useState(null);
   const [spacePressed, setSpacePressed] = useState(false);
+  const [panEnabled, setPanEnabled] = useState(false);
 
-  const svgRef = useRef(null);
-  const panMovedRef = useRef(false);
-  const pointerPositions = useRef(new Map());
+  const viewportRef = useRef(null);
+  const dragState = useRef({ active: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0 });
+  const suppressClickRef = useRef(false);
 
   const targetColor = COLORS[targetColorIndex];
 
@@ -135,22 +133,23 @@ function FourColorGame() {
 
   const handleZoomChange = (nextZoom) => {
     const clamped = clamp(nextZoom, 1, 5);
-    const center = { x: MAP_WIDTH / 2, y: MAP_HEIGHT / 2 };
-    const worldCenter = {
-      x: (center.x - panOffset.x) / zoomLevel,
-      y: (center.y - panOffset.y) / zoomLevel
-    };
-    const newOffset = {
-      x: center.x - worldCenter.x * clamped,
-      y: center.y - worldCenter.y * clamped
-    };
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      setZoomLevel(clamped);
+      return;
+    }
+    const centerX = (viewport.scrollLeft + viewport.clientWidth / 2) / zoomLevel;
+    const centerY = (viewport.scrollTop + viewport.clientHeight / 2) / zoomLevel;
     setZoomLevel(clamped);
-    setPanOffset(newOffset);
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = centerX * clamped - viewport.clientWidth / 2;
+      viewport.scrollTop = centerY * clamped - viewport.clientHeight / 2;
+    });
   };
 
   const handleRegionClick = (regionId) => {
-    if (panMovedRef.current) {
-      panMovedRef.current = false;
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
       return;
     }
     setSelectedId(regionId);
@@ -259,50 +258,51 @@ function FourColorGame() {
     generateNewPuzzle();
   };
 
+  const startDrag = (event) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    dragState.current = {
+      active: true,
+      startX: event.clientX,
+      startY: event.clientY,
+      scrollLeft: viewport.scrollLeft,
+      scrollTop: viewport.scrollTop
+    };
+    suppressClickRef.current = false;
+  };
+
   const handlePointerDown = (event) => {
     if (event.button !== 0) return;
-    const screenPoint = getSvgScreenPoint(event, svgRef.current);
-    if (!screenPoint) return;
-    pointerPositions.current.set(event.pointerId, screenPoint);
-
-    if (event.pointerType === 'touch' && pointerPositions.current.size >= 2) {
-      panMovedRef.current = false;
-      setIsPanning(true);
-      setPanStart({ point: screenPoint, offset: panOffset });
+    if (event.pointerType === 'touch' && panEnabled) {
+      startDrag(event);
       event.currentTarget.setPointerCapture(event.pointerId);
       return;
     }
-
-    if (spacePressed && zoomLevel > 1) {
-      panMovedRef.current = false;
-      setIsPanning(true);
-      setPanStart({ point: screenPoint, offset: panOffset });
+    if (spacePressed) {
+      startDrag(event);
       event.currentTarget.setPointerCapture(event.pointerId);
     }
   };
 
   const handlePointerMove = (event) => {
-    if (!isPanning || !panStart) return;
-    const screenPoint = getSvgScreenPoint(event, svgRef.current);
-    if (!screenPoint) return;
-
-    const dx = screenPoint.x - panStart.point.x;
-    const dy = screenPoint.y - panStart.point.y;
+    if (!dragState.current.active) return;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const dx = event.clientX - dragState.current.startX;
+    const dy = event.clientY - dragState.current.startY;
     if (Math.hypot(dx, dy) > PAN_THRESHOLD) {
-      panMovedRef.current = true;
+      suppressClickRef.current = true;
     }
-    setPanOffset({
-      x: panStart.offset.x + dx,
-      y: panStart.offset.y + dy
-    });
+    viewport.scrollLeft = dragState.current.scrollLeft - dx;
+    viewport.scrollTop = dragState.current.scrollTop - dy;
   };
 
-  const handlePointerUp = (event) => {
-    pointerPositions.current.delete(event.pointerId);
-    if (isPanning) {
-      setIsPanning(false);
-      setPanStart(null);
-    }
+  const handlePointerUp = () => {
+    dragState.current.active = false;
+  };
+
+  const handleTogglePan = () => {
+    setPanEnabled((prev) => !prev);
   };
 
   const renderPolygon = (region) => {
@@ -356,27 +356,39 @@ function FourColorGame() {
 
           <h3>操作指南</h3>
           <ul>
-            <li>桌面：点击区域后点颜色即可填色；按住空格拖动可移动盘面；滑条缩放盘面。</li>
-            <li>移动端：使用滑条缩放盘面；双指拖动平移查看边角。</li>
+            <li>桌面：点击区域后点颜色即可填色；按住空格拖动平移；滑条缩放盘面。</li>
+            <li>移动端：使用滑条缩放盘面；点击“移动盘面”后单指拖动平移。</li>
           </ul>
         </div>
       </details>
 
       <div className="layout">
         <div className="map-panel">
-          <svg
-            ref={svgRef}
-            className="map"
-            viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+          <div
+            className="map-viewport"
+            ref={viewportRef}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
           >
-            <g transform={`translate(${panOffset.x} ${panOffset.y}) scale(${zoomLevel})`}>
-              <rect width={MAP_WIDTH} height={MAP_HEIGHT} className="map-bg" />
-              {regions.map(renderPolygon)}
-            </g>
-          </svg>
+            <div
+              className="map-content"
+              style={{
+                width: MAP_WIDTH * zoomLevel,
+                height: MAP_HEIGHT * zoomLevel
+              }}
+            >
+              <svg
+                className="map"
+                viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+                width={MAP_WIDTH * zoomLevel}
+                height={MAP_HEIGHT * zoomLevel}
+              >
+                <rect width={MAP_WIDTH} height={MAP_HEIGHT} className="map-bg" />
+                {regions.map(renderPolygon)}
+              </svg>
+            </div>
+          </div>
         </div>
 
         <aside className="control-panel">
@@ -427,7 +439,17 @@ function FourColorGame() {
               />
               <div className="zoom-value">{Math.round(zoomLevel * 100)}%</div>
             </div>
-            <div className="muted">桌面按住空格拖动可移动盘面。</div>
+            <div className="muted">桌面按住空格拖动平移，移动端开启“移动盘面”。</div>
+          </section>
+
+          <section className="panel-section">
+            <h2>移动端平移</h2>
+            <button
+              className={panEnabled ? 'toggle active' : 'toggle'}
+              onClick={handleTogglePan}
+            >
+              {panEnabled ? '移动盘面：已开启' : '移动盘面：关闭'}
+            </button>
           </section>
 
           <section className="panel-section">
@@ -639,17 +661,6 @@ function getGreedyIterations(regionCount) {
   if (regionCount <= 80) return 60;
   if (regionCount <= 140) return 40;
   return 25;
-}
-
-function getSvgScreenPoint(event, svg) {
-  if (!svg) return null;
-  const rect = svg.getBoundingClientRect();
-  const scaleX = MAP_WIDTH / rect.width;
-  const scaleY = MAP_HEIGHT / rect.height;
-  return {
-    x: (event.clientX - rect.left) * scaleX,
-    y: (event.clientY - rect.top) * scaleY
-  };
 }
 
 function normalizePolygon(polygon) {
