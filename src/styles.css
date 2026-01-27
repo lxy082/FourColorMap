@@ -44,14 +44,15 @@ body {
 }
 
 .map-viewport {
-  width: 100%;
-  height: min(70vh, 620px);
+  width: clamp(320px, 90vw, 900px);
+  height: clamp(280px, 70vh, 650px);
   overflow: scroll;
   border-radius: 12px;
   border: 1px solid #e2e8f0;
   background: #f1f5f9;
   touch-action: none;
   scrollbar-gutter: stable both-edges;
+  position: relative;
 }
 
 .map {
@@ -66,6 +67,30 @@ body {
   display: inline-block;
   min-width: 100%;
   min-height: 100%;
+}
+
+.magnifier {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: 50%;
+  border: 3px solid #1e293b;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.25);
+  overflow: hidden;
+  pointer-events: none;
+  background: #f8fafc;
+  z-index: 5;
+}
+
+.magnifier-svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+.map-viewport.magnifier-on {
+  cursor: crosshair;
 }
 
 .map-viewport.pan-ready {

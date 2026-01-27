@@ -44,6 +44,14 @@ function FourColorGame() {
   const [spacePressed, setSpacePressed] = useState(false);
   const [panEnabled, setPanEnabled] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [magnifierOn, setMagnifierOn] = useState(false);
+  const [magnifierState, setMagnifierState] = useState({
+    visible: false,
+    x: 0,
+    y: 0,
+    worldX: 0,
+    worldY: 0
+  });
 
   const viewportRef = useRef(null);
   const prevBaseScaleRef = useRef(1);
@@ -55,6 +63,8 @@ function FourColorGame() {
     scrollTop: 0
   });
   const suppressClickRef = useRef(false);
+  const magnifierRadius = 110;
+  const magnifierZoom = 2.6;
 
   const targetColor = COLORS[targetColorIndex];
 
@@ -189,6 +199,7 @@ function FourColorGame() {
   };
 
   const handleRegionClick = (regionId) => {
+    if (magnifierOn) return;
     if (suppressClickRef.current) {
       suppressClickRef.current = false;
       return;
@@ -324,6 +335,24 @@ function FourColorGame() {
   };
 
   const handlePointerMove = (event) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    if (magnifierOn && event.pointerType === 'mouse') {
+      const rect = viewport.getBoundingClientRect();
+      const localX = event.clientX - rect.left;
+      const localY = event.clientY - rect.top;
+      const contentX = localX + viewport.scrollLeft;
+      const contentY = localY + viewport.scrollTop;
+      const worldX = contentX / (baseScale * zoomLevel);
+      const worldY = contentY / (baseScale * zoomLevel);
+      setMagnifierState({
+        visible: true,
+        x: localX,
+        y: localY,
+        worldX,
+        worldY
+      });
+    }
     if (!dragState.current.active) return;
     event.preventDefault();
     event.stopPropagation();
@@ -332,8 +361,6 @@ function FourColorGame() {
     if (Math.hypot(dx, dy) > PAN_THRESHOLD) {
       suppressClickRef.current = true;
     }
-    const viewport = viewportRef.current;
-    if (!viewport) return;
     viewport.scrollLeft = dragState.current.scrollLeft - dx;
     viewport.scrollTop = dragState.current.scrollTop - dy;
   };
@@ -345,6 +372,16 @@ function FourColorGame() {
 
   const handleTogglePan = () => {
     setPanEnabled((prev) => !prev);
+  };
+
+  const handleMagnifierToggle = () => {
+    setMagnifierOn((prev) => !prev);
+    setMagnifierState((prev) => ({ ...prev, visible: false }));
+  };
+
+  const handlePointerLeave = () => {
+    handlePointerUp();
+    setMagnifierState((prev) => ({ ...prev, visible: false }));
   };
 
   const renderPolygon = (region) => {
@@ -409,13 +446,13 @@ function FourColorGame() {
           <div
             className={`map-viewport ${isDragging ? 'is-dragging' : ''} ${
               spacePressed || panEnabled ? 'pan-ready' : ''
-            }`}
+            } ${magnifierOn ? 'magnifier-on' : ''}`}
             ref={viewportRef}
             onPointerDownCapture={handlePointerDown}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerUp}
+            onPointerLeave={handlePointerLeave}
             onPointerCancel={handlePointerUp}
           >
             <div
@@ -431,6 +468,11 @@ function FourColorGame() {
                 width={MAP_WIDTH * baseScale * zoomLevel}
                 height={MAP_HEIGHT * baseScale * zoomLevel}
                 onClickCapture={(event) => {
+                  if (magnifierOn) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                  }
                   if (suppressClickRef.current) {
                     suppressClickRef.current = false;
                     event.preventDefault();
@@ -442,6 +484,33 @@ function FourColorGame() {
                 {regions.map(renderPolygon)}
               </svg>
             </div>
+            {magnifierOn && magnifierState.visible && (
+              <div
+                className="magnifier"
+                style={{
+                  width: magnifierRadius * 2,
+                  height: magnifierRadius * 2,
+                  transform: `translate(${magnifierState.x - magnifierRadius}px, ${
+                    magnifierState.y - magnifierRadius
+                  }px)`
+                }}
+              >
+                <svg
+                  className="magnifier-svg"
+                  viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+                  width={MAP_WIDTH * magnifierZoom}
+                  height={MAP_HEIGHT * magnifierZoom}
+                  style={{
+                    transform: `translate(${magnifierRadius - magnifierState.worldX * magnifierZoom}px, ${
+                      magnifierRadius - magnifierState.worldY * magnifierZoom
+                    }px)`
+                  }}
+                >
+                  <rect width={MAP_WIDTH} height={MAP_HEIGHT} className="map-bg" />
+                  {regions.map(renderPolygon)}
+                </svg>
+              </div>
+            )}
           </div>
         </div>
 
@@ -494,6 +563,17 @@ function FourColorGame() {
               <div className="zoom-value">{Math.round(zoomLevel * 100)}%</div>
             </div>
             <div className="muted">桌面按住空格拖动平移，移动端开启“移动盘面”。</div>
+          </section>
+
+          <section className="panel-section">
+            <h2>放大镜</h2>
+            <button
+              className={magnifierOn ? 'toggle active' : 'toggle'}
+              onClick={handleMagnifierToggle}
+            >
+              {magnifierOn ? '🔍 放大镜：已开启' : '🔍 放大镜：关闭'}
+            </button>
+            {magnifierOn && <div className="muted">放大镜开启时仅观察，点击不会填色。</div>}
           </section>
 
           <section className="panel-section">
