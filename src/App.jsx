@@ -40,11 +40,13 @@ function FourColorGame() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [toast, setToast] = useState('');
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [baseScale, setBaseScale] = useState(1);
   const [spacePressed, setSpacePressed] = useState(false);
   const [panEnabled, setPanEnabled] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
   const viewportRef = useRef(null);
+  const prevBaseScaleRef = useRef(1);
   const dragState = useRef({
     active: false,
     startX: 0,
@@ -138,6 +140,38 @@ function FourColorGame() {
     };
   }, []);
 
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return undefined;
+    const updateScale = () => {
+      const rect = viewport.getBoundingClientRect();
+      const nextScale = Math.min(rect.width / MAP_WIDTH, rect.height / MAP_HEIGHT) || 1;
+      setBaseScale(nextScale);
+    };
+    updateScale();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateScale);
+      return () => window.removeEventListener('resize', updateScale);
+    }
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const prevScale = prevBaseScaleRef.current;
+    if (!prevScale || prevScale === baseScale) return;
+    const centerX = (viewport.scrollLeft + viewport.clientWidth / 2) / (prevScale * zoomLevel);
+    const centerY = (viewport.scrollTop + viewport.clientHeight / 2) / (prevScale * zoomLevel);
+    prevBaseScaleRef.current = baseScale;
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = centerX * baseScale * zoomLevel - viewport.clientWidth / 2;
+      viewport.scrollTop = centerY * baseScale * zoomLevel - viewport.clientHeight / 2;
+    });
+  }, [baseScale, zoomLevel]);
+
   const handleZoomChange = (nextZoom) => {
     const clamped = clamp(nextZoom, 1, 5);
     const viewport = viewportRef.current;
@@ -145,12 +179,12 @@ function FourColorGame() {
       setZoomLevel(clamped);
       return;
     }
-    const centerX = (viewport.scrollLeft + viewport.clientWidth / 2) / zoomLevel;
-    const centerY = (viewport.scrollTop + viewport.clientHeight / 2) / zoomLevel;
+    const centerX = (viewport.scrollLeft + viewport.clientWidth / 2) / (baseScale * zoomLevel);
+    const centerY = (viewport.scrollTop + viewport.clientHeight / 2) / (baseScale * zoomLevel);
     setZoomLevel(clamped);
     requestAnimationFrame(() => {
-      viewport.scrollLeft = centerX * clamped - viewport.clientWidth / 2;
-      viewport.scrollTop = centerY * clamped - viewport.clientHeight / 2;
+      viewport.scrollLeft = centerX * baseScale * clamped - viewport.clientWidth / 2;
+      viewport.scrollTop = centerY * baseScale * clamped - viewport.clientHeight / 2;
     });
   };
 
@@ -377,6 +411,7 @@ function FourColorGame() {
               spacePressed || panEnabled ? 'pan-ready' : ''
             }`}
             ref={viewportRef}
+            onPointerDownCapture={handlePointerDown}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
@@ -386,15 +421,15 @@ function FourColorGame() {
             <div
               className="map-content"
               style={{
-                width: MAP_WIDTH * zoomLevel,
-                height: MAP_HEIGHT * zoomLevel
+                width: MAP_WIDTH * baseScale * zoomLevel,
+                height: MAP_HEIGHT * baseScale * zoomLevel
               }}
             >
               <svg
                 className="map"
                 viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
-                width={MAP_WIDTH * zoomLevel}
-                height={MAP_HEIGHT * zoomLevel}
+                width={MAP_WIDTH * baseScale * zoomLevel}
+                height={MAP_HEIGHT * baseScale * zoomLevel}
                 onClickCapture={(event) => {
                   if (suppressClickRef.current) {
                     suppressClickRef.current = false;
