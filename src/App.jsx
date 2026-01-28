@@ -8,8 +8,8 @@ const COLORS = [
   { name: '黄', hex: '#f59e0b' }
 ];
 
-const MAP_WIDTH = 900;
-const MAP_HEIGHT = 620;
+const MAP_WIDTH = 1200;
+const MAP_HEIGHT = 800;
 
 const MIN_REGION_COUNT = 10;
 const MAX_REGION_COUNT = 200;
