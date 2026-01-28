@@ -28,6 +28,7 @@ function FourColorGame() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [regions, setRegions] = useState([]);
   const [adjacency, setAdjacency] = useState(new Map());
+  const [adjacencyMeta, setAdjacencyMeta] = useState(new Map());
   const [targetColorIndex, setTargetColorIndex] = useState(0);
   const [referenceTargetCount, setReferenceTargetCount] = useState(0);
   const [currentColor, setCurrentColor] = useState(0);
@@ -87,19 +88,17 @@ function FourColorGame() {
     return regions.filter((region) => region.color === targetColorIndex).length;
   }, [regions, targetColorIndex]);
 
-  const adjacencyEdgeCount = useMemo(() => {
-    let count = 0;
-    adjacency.forEach((neighbors) => {
-      count += neighbors.size;
-    });
-    return Math.floor(count / 2);
-  }, [adjacency]);
+  const adjacencyEdgeCount = useMemo(() => adjacencyMeta.size, [adjacencyMeta]);
 
   const generateNewPuzzle = useCallback(() => {
     setIsGenerating(true);
     const targetIndex = Math.floor(Math.random() * COLORS.length);
     const count = clamp(Math.round(regionCount), MIN_REGION_COUNT, MAX_REGION_COUNT);
-    const { regions: newRegions, adjacency: newAdjacency } = generateRandomMap(
+    const {
+      regions: newRegions,
+      adjacency: newAdjacency,
+      adjacencyMeta: newAdjacencyMeta
+    } = generateRandomMap(
       count,
       MAP_WIDTH,
       MAP_HEIGHT
@@ -111,6 +110,7 @@ function FourColorGame() {
     setReferenceTargetCount(referenceCount);
     setRegions(newRegions);
     setAdjacency(newAdjacency);
+    setAdjacencyMeta(newAdjacencyMeta);
     setSelectedId(null);
     setConflicts([]);
     setMessage('');
@@ -279,6 +279,13 @@ function FourColorGame() {
     const allFilled = regions.every((region) => region.color != null);
 
     if (conflictPairs.length > 0) {
+      conflictPairs.forEach(([a, b]) => {
+        const key = pairKey(a, b);
+        const shared = adjacencyMeta.get(key);
+        if (shared != null) {
+          console.info(`Conflict ${a} ↔ ${b}, shared edge length=${shared.toFixed(2)}`);
+        }
+      });
       setMessage(`发现 ${conflictPairs.length} 处相邻同色冲突，请调整。`);
       return;
     }
@@ -393,8 +400,9 @@ function FourColorGame() {
       <polygon
         key={region.id}
         points={points}
-        fill={color}
-        className={`region ${isSelected ? 'selected' : ''} ${isConflict ? 'conflict' : ''}`}
+        fill="var(--fill-color)"
+        style={{ '--fill-color': color }}
+        className={`region ${isSelected ? 'selected' : ''} ${isConflict ? 'conflict-fill' : ''}`}
         onClick={() => handleRegionClick(region.id)}
       />
     );
@@ -705,22 +713,10 @@ function generateRandomMap(regionCount, width, height) {
     };
   });
 
-  const adjacency = new Map();
-  regions.forEach((region) => {
-    if (region) adjacency.set(region.id, new Set());
-  });
-
-  regions.forEach((region, index) => {
-    if (!region) return;
-    for (const neighbor of delaunay.neighbors(index)) {
-      const neighborRegion = regions[neighbor];
-      if (!neighborRegion) continue;
-      adjacency.get(region.id)?.add(neighborRegion.id);
-      adjacency.get(neighborRegion.id)?.add(region.id);
-    }
-  });
-
-  return { regions: regions.filter(Boolean), adjacency };
+  const filtered = regions.filter(Boolean);
+  const { adjacency, adjacencyMeta } = buildAdjacencyFromEdges(filtered);
+  validateAdjacency(adjacency);
+  return { regions: filtered, adjacency, adjacencyMeta };
 }
 
 function createPoints(count, width, height) {
@@ -795,6 +791,77 @@ function getGreedyIterations(regionCount) {
   if (regionCount <= 80) return 60;
   if (regionCount <= 140) return 40;
   return 25;
+}
+
+function buildAdjacencyFromEdges(regions) {
+  const adjacency = new Map();
+  const adjacencyMeta = new Map();
+  const edgeMap = new Map();
+  const quantize = (value, eps) => Math.round(value / eps) * eps;
+  const eps = 0.5;
+  const minSharedLen = 2;
+
+  regions.forEach((region) => adjacency.set(region.id, new Set()));
+
+  regions.forEach((region) => {
+    const poly = region.polygon;
+    for (let i = 0; i < poly.length; i += 1) {
+      const start = poly[i];
+      const end = poly[(i + 1) % poly.length];
+      const length = Math.hypot(end.x - start.x, end.y - start.y);
+      if (length < minSharedLen) continue;
+      const a = { x: quantize(start.x, eps), y: quantize(start.y, eps) };
+      const b = { x: quantize(end.x, eps), y: quantize(end.y, eps) };
+      const key = edgeKey(a, b);
+      if (!edgeMap.has(key)) {
+        edgeMap.set(key, []);
+      }
+      edgeMap.get(key).push({ regionId: region.id, length });
+    }
+  });
+
+  edgeMap.forEach((entries) => {
+    if (entries.length < 2) return;
+    for (let i = 0; i < entries.length; i += 1) {
+      for (let j = i + 1; j < entries.length; j += 1) {
+        const a = entries[i];
+        const b = entries[j];
+        if (a.regionId === b.regionId) continue;
+        const sharedLen = Math.min(a.length, b.length);
+        if (sharedLen <= minSharedLen) continue;
+        adjacency.get(a.regionId)?.add(b.regionId);
+        adjacency.get(b.regionId)?.add(a.regionId);
+        const key = pairKey(a.regionId, b.regionId);
+        const existing = adjacencyMeta.get(key);
+        adjacencyMeta.set(key, existing ? Math.max(existing, sharedLen) : sharedLen);
+      }
+    }
+  });
+
+  return { adjacency, adjacencyMeta };
+}
+
+function validateAdjacency(adjacency) {
+  adjacency.forEach((neighbors, regionId) => {
+    if (neighbors.has(regionId)) {
+      console.warn(`Adjacency contains self reference for ${regionId}`);
+    }
+    neighbors.forEach((neighborId) => {
+      if (!adjacency.get(neighborId)?.has(regionId)) {
+        console.warn(`Adjacency not symmetric for ${regionId} ↔ ${neighborId}`);
+      }
+    });
+  });
+}
+
+function edgeKey(a, b) {
+  const first = a.x < b.x || (a.x === b.x && a.y <= b.y) ? a : b;
+  const second = first === a ? b : a;
+  return `${first.x},${first.y}|${second.x},${second.y}`;
+}
+
+function pairKey(a, b) {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
 function normalizePolygon(polygon) {
