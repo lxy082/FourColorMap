@@ -94,6 +94,12 @@ body {
   pointer-events: none;
 }
 
+.magnifier-crosshair line {
+  stroke: #ef4444;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
 .map-viewport.magnifier-on {
   cursor: crosshair;
 }

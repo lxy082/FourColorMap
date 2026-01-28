@@ -55,6 +55,7 @@ function FourColorGame() {
     worldY: 0
   });
 
+  const svgRef = useRef(null);
   const viewportRef = useRef(null);
   const prevBaseScaleRef = useRef(1);
   const dragState = useRef({
@@ -68,6 +69,7 @@ function FourColorGame() {
   const magnifierRadius = 110;
   const magnifierZoom = 2.6;
   const isZoomed = zoomLevel > 1;
+  const showMagnifierDebug = magnifierOn;
 
   const targetColor = COLORS[targetColorIndex];
 
@@ -358,8 +360,36 @@ function FourColorGame() {
       const localY = event.clientY - rect.top;
       const contentX = localX + viewport.scrollLeft;
       const contentY = localY + viewport.scrollTop;
-      const worldX = contentX / (baseScale * zoomLevel);
-      const worldY = contentY / (baseScale * zoomLevel);
+      const svg = svgRef.current;
+      const ctm = svg?.getScreenCTM();
+      if (!ctm) return;
+      const worldPoint = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse());
+      const worldX = worldPoint.x;
+      const worldY = worldPoint.y;
+      const translateX = magnifierRadius - worldX * magnifierZoom;
+      const translateY = magnifierRadius - worldY * magnifierZoom;
+      console.info('Magnifier debug', {
+        viewportRect: {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height
+        },
+        scrollLeft: viewport.scrollLeft,
+        scrollTop: viewport.scrollTop,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        vx: localX,
+        vy: localY,
+        cx: contentX,
+        cy: contentY,
+        wx: worldX,
+        wy: worldY,
+        R: magnifierRadius,
+        Z: magnifierZoom,
+        tx: translateX,
+        ty: translateY
+      });
       setMagnifierState({
         visible: true,
         x: localX,
@@ -484,6 +514,7 @@ function FourColorGame() {
                 width={isZoomed ? viewportSize.width * zoomLevel : '100%'}
                 height={isZoomed ? viewportSize.height * zoomLevel : '100%'}
                 preserveAspectRatio="xMidYMid meet"
+                ref={svgRef}
                 onClickCapture={(event) => {
                   if (magnifierOn) {
                     event.preventDefault();
@@ -499,6 +530,22 @@ function FourColorGame() {
               >
                 <rect width={MAP_WIDTH} height={MAP_HEIGHT} className="map-bg" />
                 {regions.map(renderPolygon)}
+                {showMagnifierDebug && magnifierState.visible && (
+                  <g className="magnifier-crosshair">
+                    <line
+                      x1={magnifierState.worldX - 6}
+                      y1={magnifierState.worldY}
+                      x2={magnifierState.worldX + 6}
+                      y2={magnifierState.worldY}
+                    />
+                    <line
+                      x1={magnifierState.worldX}
+                      y1={magnifierState.worldY - 6}
+                      x2={magnifierState.worldX}
+                      y2={magnifierState.worldY + 6}
+                    />
+                  </g>
+                )}
               </svg>
             </div>
             {magnifierOn && magnifierState.visible && (
@@ -514,17 +561,34 @@ function FourColorGame() {
               >
                 <svg
                   className="magnifier-svg"
-                  viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
-                  width={MAP_WIDTH * magnifierZoom}
-                  height={MAP_HEIGHT * magnifierZoom}
-                  style={{
-                    transform: `translate(${magnifierRadius - magnifierState.worldX * magnifierZoom}px, ${
-                      magnifierRadius - magnifierState.worldY * magnifierZoom
-                    }px)`
-                  }}
+                  viewBox={`0 0 ${magnifierRadius * 2} ${magnifierRadius * 2}`}
+                  width={magnifierRadius * 2}
+                  height={magnifierRadius * 2}
                 >
-                  <rect width={MAP_WIDTH} height={MAP_HEIGHT} className="map-bg" />
-                  {regions.map(renderPolygon)}
+                  <g
+                    transform={`translate(${magnifierRadius - magnifierState.worldX * magnifierZoom} ${
+                      magnifierRadius - magnifierState.worldY * magnifierZoom
+                    }) scale(${magnifierZoom})`}
+                  >
+                    <rect width={MAP_WIDTH} height={MAP_HEIGHT} className="map-bg" />
+                    {regions.map(renderPolygon)}
+                    {showMagnifierDebug && (
+                      <g className="magnifier-crosshair">
+                        <line
+                          x1={magnifierState.worldX - 6}
+                          y1={magnifierState.worldY}
+                          x2={magnifierState.worldX + 6}
+                          y2={magnifierState.worldY}
+                        />
+                        <line
+                          x1={magnifierState.worldX}
+                          y1={magnifierState.worldY - 6}
+                          x2={magnifierState.worldX}
+                          y2={magnifierState.worldY + 6}
+                        />
+                      </g>
+                    )}
+                  </g>
                 </svg>
               </div>
             )}
