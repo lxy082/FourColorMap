@@ -8,8 +8,8 @@ const COLORS = [
   { name: '黄', hex: '#f59e0b' }
 ];
 
-const MAP_WIDTH = 1200;
-const MAP_HEIGHT = 800;
+const MAP_WIDTH = 900;
+const MAP_HEIGHT = 620;
 
 const MIN_REGION_COUNT = 10;
 const MAX_REGION_COUNT = 200;
@@ -41,6 +41,7 @@ function FourColorGame() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [toast, setToast] = useState('');
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [baseScale, setBaseScale] = useState(1);
   const [spacePressed, setSpacePressed] = useState(false);
   const [panEnabled, setPanEnabled] = useState(false);
@@ -66,6 +67,7 @@ function FourColorGame() {
   const suppressClickRef = useRef(false);
   const magnifierRadius = 110;
   const magnifierZoom = 2.6;
+  const isZoomed = zoomLevel > 1;
 
   const targetColor = COLORS[targetColorIndex];
 
@@ -155,6 +157,7 @@ function FourColorGame() {
     if (!viewport) return undefined;
     const updateScale = () => {
       const rect = viewport.getBoundingClientRect();
+      setViewportSize({ width: rect.width, height: rect.height });
       const nextScale = Math.min(rect.width / MAP_WIDTH, rect.height / MAP_HEIGHT) || 1;
       setBaseScale(nextScale);
     };
@@ -193,6 +196,11 @@ function FourColorGame() {
     const centerY = (viewport.scrollTop + viewport.clientHeight / 2) / (baseScale * zoomLevel);
     setZoomLevel(clamped);
     requestAnimationFrame(() => {
+      if (clamped <= 1) {
+        viewport.scrollLeft = 0;
+        viewport.scrollTop = 0;
+        return;
+      }
       viewport.scrollLeft = centerX * baseScale * clamped - viewport.clientWidth / 2;
       viewport.scrollTop = centerY * baseScale * clamped - viewport.clientHeight / 2;
     });
@@ -454,7 +462,7 @@ function FourColorGame() {
           <div
             className={`map-viewport ${isDragging ? 'is-dragging' : ''} ${
               spacePressed || panEnabled ? 'pan-ready' : ''
-            } ${magnifierOn ? 'magnifier-on' : ''}`}
+            } ${magnifierOn ? 'magnifier-on' : ''} ${isZoomed ? 'zoomed' : 'fit'}`}
             ref={viewportRef}
             onPointerDownCapture={handlePointerDown}
             onPointerDown={handlePointerDown}
@@ -466,15 +474,16 @@ function FourColorGame() {
             <div
               className="map-content"
               style={{
-                width: MAP_WIDTH * baseScale * zoomLevel,
-                height: MAP_HEIGHT * baseScale * zoomLevel
+                width: isZoomed ? viewportSize.width * zoomLevel : '100%',
+                height: isZoomed ? viewportSize.height * zoomLevel : '100%'
               }}
             >
               <svg
                 className="map"
                 viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
-                width={MAP_WIDTH * baseScale * zoomLevel}
-                height={MAP_HEIGHT * baseScale * zoomLevel}
+                width={isZoomed ? viewportSize.width * zoomLevel : '100%'}
+                height={isZoomed ? viewportSize.height * zoomLevel : '100%'}
+                preserveAspectRatio="xMidYMid meet"
                 onClickCapture={(event) => {
                   if (magnifierOn) {
                     event.preventDefault();

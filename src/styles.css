@@ -32,7 +32,7 @@ body {
 
 .layout {
   display: grid;
-  grid-template-columns: 1.2fr 0.8fr;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
   gap: 20px;
 }
 
@@ -41,18 +41,23 @@ body {
   border-radius: 16px;
   padding: 12px;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+  width: 100%;
 }
 
 .map-viewport {
-  width: clamp(320px, 90vw, 900px);
-  height: clamp(280px, 70vh, 650px);
-  overflow: scroll;
+  width: 100%;
+  height: clamp(520px, 72vh, 840px);
+  overflow: hidden;
   border-radius: 12px;
   border: 1px solid #e2e8f0;
   background: #f1f5f9;
   touch-action: none;
-  scrollbar-gutter: stable both-edges;
   position: relative;
+}
+
+.map-viewport.zoomed {
+  overflow: auto;
+  scrollbar-gutter: stable both-edges;
 }
 
 .map {
