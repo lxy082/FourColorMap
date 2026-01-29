@@ -43,6 +43,7 @@ function FourColorGame() {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [baseScale, setBaseScale] = useState(1);
+  const [colorLimit] = useState(COLORS.length);
   const [spacePressed, setSpacePressed] = useState(false);
   const [panEnabled, setPanEnabled] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -320,6 +321,24 @@ function FourColorGame() {
     setConflicts([]);
     setMessage('');
     setShowResetModal(false);
+  };
+
+  const handleAutoColor = () => {
+    const result = solveColoring(regions, adjacency, colorLimit);
+    if (!result.success) {
+      setMessage(`当前目标色数 ${colorLimit} 不可行，请尝试手动调整。`);
+      return;
+    }
+    setRegions((prev) =>
+      prev.map((region) => ({
+        ...region,
+        color: result.coloring.get(region.id) ?? null
+      }))
+    );
+    setHistory([]);
+    setRedoStack([]);
+    setConflicts([]);
+    setMessage(`已使用 ${colorLimit} 色生成推荐填色方案。`);
   };
 
   const handleNewPuzzle = () => {
@@ -704,6 +723,9 @@ function FourColorGame() {
               <button className="primary" onClick={handleCheck} disabled={!regions.length || isGenerating}>
                 {isGenerating ? '生成中...' : '检查/提交'}
               </button>
+              <button onClick={handleAutoColor} disabled={!regions.length || isGenerating}>
+                一键推荐填色（{colorLimit} 色）
+              </button>
               <button onClick={() => setShowResetModal(true)} disabled={!regions.length || isGenerating}>
                 重置本题
               </button>
@@ -925,6 +947,75 @@ function validateAdjacency(adjacency) {
       }
     });
   });
+}
+
+function solveColoring(regions, adjacency, colorCount) {
+  const regionIds = regions.map((region) => region.id);
+  const colors = new Map();
+  const neighborMap = new Map();
+  const degreeMap = new Map();
+
+  regionIds.forEach((id) => {
+    const neighbors = adjacency.get(id) ? Array.from(adjacency.get(id)) : [];
+    neighborMap.set(id, neighbors);
+    degreeMap.set(id, neighbors.length);
+  });
+
+  const getSaturation = (id) => {
+    const used = new Set();
+    neighborMap.get(id)?.forEach((neighborId) => {
+      const color = colors.get(neighborId);
+      if (color != null) used.add(color);
+    });
+    return used;
+  };
+
+  const selectNext = () => {
+    let best = null;
+    let bestSat = -1;
+    let bestDegree = -1;
+    regionIds.forEach((id) => {
+      if (colors.has(id)) return;
+      const sat = getSaturation(id);
+      const degree = degreeMap.get(id) ?? 0;
+      if (
+        best === null ||
+        sat.size > bestSat ||
+        (sat.size === bestSat && degree > bestDegree) ||
+        (sat.size === bestSat && degree === bestDegree && id < best)
+      ) {
+        best = id;
+        bestSat = sat.size;
+        bestDegree = degree;
+      }
+    });
+    return best;
+  };
+
+  const orderColors = (id) => {
+    const used = getSaturation(id);
+    const available = [];
+    for (let c = 0; c < colorCount; c += 1) {
+      if (!used.has(c)) available.push(c);
+    }
+    return available;
+  };
+
+  const backtrack = () => {
+    if (colors.size === regionIds.length) return true;
+    const id = selectNext();
+    if (!id) return false;
+    const choices = orderColors(id);
+    for (const color of choices) {
+      colors.set(id, color);
+      if (backtrack()) return true;
+      colors.delete(id);
+    }
+    return false;
+  };
+
+  const success = backtrack();
+  return { success, coloring: colors };
 }
 
 function edgeKey(a, b) {
